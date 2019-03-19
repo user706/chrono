@@ -14,8 +14,73 @@
 #include <catch.hpp>
 
 #include "timer.hpp"
-
 using namespace Chrono;
+
+#include <memory>
+#include <iostream>
+#include <thread>
+
+class X {
+public:
+    X(int i) : i_(i) {
+    }
+
+    int &i() { return i_; }
+private:
+    int i_;
+};
+
+class A {
+public:
+    A(boost::asio::io_context &ioc) : i_(111), spi_(std::make_shared<X>(222)), timer_{ioc, std::chrono::steady_clock::now() + std::chrono::milliseconds(1000)}
+    {
+        std::cout << "i_        == " << i_    << std::endl;
+        std::cout << "spi_->i() == " << spi_->i() << std::endl;
+        timer_.Start(
+                    [&]() {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                        std::cout << "i_        => " << i_    << std::endl;
+                        std::cout << "spi_->i() => " << spi_->i() << std::endl; });
+    }
+    
+private:
+    int i_;
+    std::shared_ptr<X> spi_;
+    PointTimer<std::chrono::hours, boost::asio::io_context, boost::asio::steady_timer> timer_;
+};
+
+
+SCENARIO(
+    "lifetime issues",
+    "[timer000][common][timer]")
+{
+  auto second_from_now =
+      std::chrono::system_clock::now() + std::chrono::seconds{1};
+  std::chrono::system_clock::time_point expire_time;
+
+  boost::asio::io_context ioc;
+  std::thread th([&ioc]()
+                 {
+                     A a(ioc);
+
+#define DO_FAIL
+//#undef DO_FAIL
+                     
+#ifdef DO_FAIL
+                     std::chrono::milliseconds delay(1010);
+#else
+                     std::chrono::milliseconds delay(1100);
+#endif
+                     
+                     std::this_thread::sleep_for(delay);
+                 });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(100)); // wait a bit for the thread above the start, so that ioc has work to do, instead of falling through when ioc.run() is called below
+
+  ioc.run();
+  th.join();
+}
+
 
 SCENARIO(
     "test point timer expire at specific a time point",
